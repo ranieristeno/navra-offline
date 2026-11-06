@@ -1,7 +1,7 @@
-const CACHE = 'navra-offline-v8-articoli';
+const CACHE = 'navra-offline-v9-organizzazione-vendite';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
-  './navra-report-articoli.js', './manifest.webmanifest', './icon.svg',
+  './navra-report-articoli.js', './navra-organizzazione-vendite.js', './manifest.webmanifest', './icon.svg',
   './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(
   caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
