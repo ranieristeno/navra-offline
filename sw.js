@@ -1,6 +1,6 @@
-const CACHE = 'navra-offline-v6-single-upgrade';
+const CACHE = 'navra-offline-v7-lotti';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js', './navra-upgrade.js',
-  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+  './navra-lotti.js', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(Promise.all([
   self.clients.claim(),
