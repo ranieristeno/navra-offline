@@ -69,6 +69,7 @@
     .nv-cash-movement-right{text-align:right;white-space:nowrap}
     .nv-cash-movement-right .nv-actions{justify-content:flex-end;gap:5px;flex-wrap:wrap}
     @media(min-width:680px){.nv-cash-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.nv-cash-metrics .metric:last-child{grid-column:auto}}
+    @media(min-width:680px){.nv-dashboard-six-kpi{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media(max-width:380px){.nv-boxes{grid-template-columns:1fr}}
   `;document.head.appendChild(style);
 
@@ -165,6 +166,23 @@
   dashboard=function() {
     let base=oldDashboard();
     const sold=sales();
+    // Fatturato e costo d'acquisto della SOLA merce venduta (spedizione inclusa).
+    // I calcoli sono in centesimi per evitare errori floating point.
+    const revenueCents=sold.reduce((sum,r)=>sum+Math.round((Number(r.data?.salePrice)||0)*100),0);
+    const soldCostCents=sold.reduce((sum,r)=>sum+
+      Math.round((Number(r.data?.purchase)||0)*100)+Math.round((Number(r.data?.purchaseShipping)||0)*100),0);
+    const kpiFatturato=metric('Fatturato',eur(revenueCents/100));
+    const kpiCostoVenduto=metric('Costo merce venduta',eur(soldCostCents/100));
+    // I primi quattro indicatori restano identici: aggiungiamo gli altri due nella stessa griglia.
+    const profAnchor='<div class="panel" style="margin-top:14px"><strong>Ripartizione utili realizzati';
+    const profIndex=base.indexOf(profAnchor);
+    if (profIndex >= 0) {
+      const metricsClose=base.lastIndexOf('</div>',profIndex);
+      if (metricsClose >= 0) {
+        base=base.slice(0,metricsClose)+kpiFatturato+kpiCostoVenduto+base.slice(metricsClose);
+        base=base.replace('<div class="metrics">','<div class="metrics nv-dashboard-six-kpi">');
+      }
+    }
     const ste=sold.reduce((a,r)=>a+margin(r)*share(r)/100,0);
     const ole=sold.reduce((a,r)=>a+margin(r)*(100-share(r))/100,0);
     const correct='<div class="panel" style="margin-top:14px"><strong>Utili ripartiti per vendita</strong>'+
@@ -175,10 +193,14 @@
     const ledger=active('cost').filter(r=>['expense','settlement'].includes(r.data?.kind));
     const bal=window.NavraCosts?.calculate ? window.NavraCosts.calculate(ledger).balance : 0;
     const debt=bal>0?'Stefano deve '+eur(bal/100)+' a Oleg':bal<0?'Oleg deve '+eur(-bal/100)+' a Stefano':'Nessun saldo tra soci';
-    return base+'<section class="panel" style="margin-top:15px"><h2>Conti tra Stefano e Oleg</h2><strong>'+safe(debt)+'</strong>'+
+    const debtPanel='<section class="panel" style="margin-top:15px"><h2>Saldo tra soci</h2><strong>'+safe(debt)+'</strong>'+
       '<p class="hint">Saldo anticipi e rimborsi condivisi. Non rappresenta gli utili né il denaro in cassa.</p>'+
       '<div class="nv-actions"><button type="button" class="btn alt small" data-view="costs">Apri spese e rimborsi</button>'+
-      '<button type="button" class="btn alt small" data-view="sales">Apri vendite</button></div></section>'+cashInDashboard();
+      '<button type="button" class="btn alt small" data-view="sales">Apri vendite</button></div></section>';
+    // Ordine Riepilogo: 6 KPI, utili per socio, saldo debiti, cassa, ultimi articoli.
+    const firstRecent=/<div class="head"><h2>Ultimi (?:articoli|orologi)<\/h2>/;
+    const panels=debtPanel+cashInDashboard();
+    return firstRecent.test(base) ? base.replace(firstRecent,panels+'$&') : base+panels;
   };
 
   const previousRender=render;
