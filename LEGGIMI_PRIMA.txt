@@ -1,0 +1,35 @@
+NAVRA - AGGIORNAMENTO ARTICOLI + FINANZA
+==========================================
+
+COSA CAMBIA
+- Articoli sostituisce la voce Orologi.
+- Categorie iniziali: Orologi, Borse, Occhiali; nuove categorie libere.
+- Filtri per categoria nella sezione Articoli.
+- Ritorno delle sezioni Foto, Costi condivisi, Cassa, Beni, Excel.
+- Lotti già esistenti mantenuti. Ogni scheda del lotto può ricevere una categoria.
+- Excel con fogli Articoli (foto e categorie), Finanza, Costi, Cassa,
+  Beni, Mercatini, Spedizioni, Fornitori e Lotti.
+- Nessuna modifica al nome o alla struttura del database IndexedDB.
+
+INSTALLAZIONE DA GITHUB
+1. Prima: nell'app NAVRA aprire Impostazioni e scaricare un backup JSON.
+2. Estrarre questo ZIP nell'app File di iPhone (oppure su computer).
+3. Aprire https://github.com/ranieristeno/navra-offline
+4. Nella radice del repository: Add file > Upload files.
+5. Selezionare i cinque file del pacchetto:
+   index.html, sw.js, manifest.webmanifest,
+   navra-articoli.js, navra-report-articoli.js
+   NON caricare il file ZIP in luogo dei singoli file.
+6. Confermare Commit changes e la sostituzione dei file esistenti.
+7. Aspettare la pubblicazione GitHub Pages, quindi riaprire NAVRA su iPhone.
+   Su un'app già installata potrebbe servire chiuderla completamente e riaprirla.
+8. Controllare che appaiano Articoli, Costi, Cassa, Beni, Excel e Lotti.
+
+IMPORTANTE
+- I file app.js, firebase-adapter.js, navra-upgrade.js e navra-lotti.js
+  sono già nel repository e devono rimanere dove sono.
+- Non cancellare la vecchia app né eliminare i dati di Safari prima di fare il backup.
+- La sincronizzazione con Firebase richiede le regole già configurate nel progetto;
+  non è stata testata qui su un account Firebase reale.
+- Il nuovo ZIP Excel è stato testato con dati simulati, ma occorre verificare
+  il funzionamento completo sul sito pubblicato e sui telefoni dei soci.
