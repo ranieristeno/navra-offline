@@ -58,6 +58,17 @@
     #nv-sale-dialog .field{margin-bottom:8px}
     #nv-sale-market-row[hidden]{display:none}
     .nv-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+    .nv-cash-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .nv-cash-metrics .metric{min-width:0;padding:12px}
+    .nv-cash-metrics .num{font-size:18px;overflow-wrap:anywhere}
+    .nv-cash-metrics .metric:last-child{grid-column:1/-1}
+    .nv-cash-history{margin-top:15px;padding-top:12px;border-top:1px solid var(--line)}
+    .nv-cash-history summary{cursor:pointer;font-weight:650;color:var(--dark);padding:5px 0 10px}
+    .nv-cash-movement{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-top:1px solid var(--line);padding:12px 0}
+    .nv-cash-movement small{display:block;font-size:12px;color:var(--muted);margin-top:3px}
+    .nv-cash-movement-right{text-align:right;white-space:nowrap}
+    .nv-cash-movement-right .nv-actions{justify-content:flex-end;gap:5px;flex-wrap:wrap}
+    @media(min-width:680px){.nv-cash-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.nv-cash-metrics .metric:last-child{grid-column:auto}}
     @media(max-width:380px){.nv-boxes{grid-template-columns:1fr}}
   `;document.head.appendChild(style);
 
@@ -65,7 +76,7 @@
     ['beni-spese','assets','costs','cash'].includes(view)?'beni-spese':view;
   const subnav = group => {
     const items=group==='acquisti' ? [['lots','Lotti'],['watch','Articoli / Stock'],['supplier','Fornitori']] :
-      [['assets','Beni da ammortizzare'],['costs','Spese e rimborsi'],['cash','Cassa soci']];
+      [['assets','Beni da ammortizzare'],['costs','Spese e rimborsi']];
     return '<div class="nv-tabs">'+items.map(([v,l])=>'<button type="button" data-view="'+v+'" class="'+(state.view===v?'active':'')+'">'+l+'</button>').join('')+'</div>';
   };
   const groupHome = group => {
@@ -76,8 +87,7 @@
       ['supplier','Fornitori','Contatti e provenienza']
     ] : [
       ['assets','Beni da ammortizzare','Teche, attrezzature e strumenti'],
-      ['costs','Spese e rimborsi','Mercatini, trasporti e conti condivisi'],
-      ['cash','Cassa soci','Denaro custodito da Stefano e Oleg']
+      ['costs','Spese e rimborsi','Mercatini, trasporti e conti condivisi']
     ];
     const orphans=purch?active('shipment').filter(r=>!r.data?.watchId&&!r.data?.lotId).length:0;
     return '<div class="head"><h1>'+ (purch?'Acquisti':'Beni e spese') +'</h1></div>'+
@@ -111,6 +121,46 @@
     '<p class="hint">Registra nome, città, data e costo banco. Le vendite vengono collegate al mercatino dalla scheda Vendite. Non sommare due volte gli incassi.</p>'+
     (entries.length?entries.map(m=>'<div class="nv-line"><strong>'+safe(m.data?.name)+' · '+safe(m.data?.date||'')+'</strong><small>'+safe(m.data?.city||'')+' · Banco: '+safe(eur(m.data?.fee))+'</small><button type="button" class="btn alt small" data-nv-market-edit="'+safe(m.id)+'">Modifica</button></div>').join(''):'<div class="empty">Nessun mercatino registrato.</div>')+'</section>';
   }
+  // La cassa misura denaro fisicamente detenuto, distinto dai debiti Splitwise.
+  // Usa gli stessi record e gli stessi comandi della vecchia pagina Cassa.
+  function cashInDashboard(){
+    const records=active('cost').filter(r=>['cash_in','cash_out','cash_transfer','sale_receipt'].includes(r.data?.kind))
+      .sort((a,b)=>(b.data?.date||'').localeCompare(a.data?.date||'') || b.updated_at.localeCompare(a.updated_at));
+    const cassa=window.NavraCassa?.calculate?.(records);
+    if(!cassa) return '<section class="panel"><h2>Cassa soci</h2><p class="hint">Cassa non ancora disponibile.</p></section>';
+    const cents=x=>Math.round((Number(x)||0)*100);
+    const amount=x=>safe(eur((Number(x)||0)/100));
+    const transactions=records.map(r=>{
+      const d=r.data||{};
+      const locked=!!d.autoFromWatch && watches().some(w=>w.id===d.watchId);
+      const text=d.kind==='cash_transfer' ? safe(d.from)+' → '+safe(d.to) :
+        d.kind==='cash_out' ? 'Uscita dalla cassa di '+safe(d.holder) :
+        d.kind==='sale_receipt' ? 'Vendita incassata da '+safe(d.holder) : 'Entrata nella cassa di '+safe(d.holder);
+      return '<div class="nv-cash-movement"><div style="min-width:0;flex:1"><strong>'+safe(d.title||'Movimento')+'</strong>'+
+        '<small>'+safe(d.date||'Data non indicata')+' · '+text+'</small>'+
+        (d.notes?'<small>'+safe(d.notes)+'</small>':'')+'</div>'+
+        '<div class="nv-cash-movement-right"><strong>'+amount(cents(d.amount))+'</strong>'+
+        (!locked?'<div class="nv-actions"><button type="button" class="btn alt small" data-cash-edit="'+safe(r.id)+'">Modifica</button>'+
+          '<button type="button" class="btn alt small" data-cash-delete="'+safe(r.id)+'">Elimina</button></div>':'')+'</div></div>';
+    }).join('');
+    return '<section class="panel nv-cash-home" style="margin-top:15px">'+
+      '<h2 style="margin-top:0">Cassa soci</h2>'+
+      '<p class="hint">Denaro dell’attività materialmente in mano a ciascun socio. Non è il saldo dei rimborsi né l’utile da dividere.</p>'+
+      '<div class="nv-cash-metrics">'+
+        '<div class="metric"><div class="label">In mano a Stefano</div><div class="num">'+amount(cassa.Stefano)+'</div></div>'+
+        '<div class="metric"><div class="label">In mano a Oleg</div><div class="num">'+amount(cassa.Oleg)+'</div></div>'+
+        '<div class="metric"><div class="label">Cassa totale</div><div class="num">'+amount(cassa.total)+'</div></div>'+
+      '</div>'+
+      '<div class="nv-actions" style="margin-top:14px">'+
+        '<button type="button" class="btn small" data-cash-add="cash_in">+ Entrata</button>'+
+        '<button type="button" class="btn alt small" data-cash-add="cash_out">+ Uscita</button>'+
+        '<button type="button" class="btn alt small" data-cash-add="cash_transfer">Trasferimento</button>'+
+      '</div>'+
+      (records.length ? '<details class="nv-cash-history"><summary>Movimenti di cassa ('+records.length+')</summary>'+transactions+'</details>' :
+        '<p class="hint" style="margin-top:14px">Nessun movimento di cassa registrato.</p>')+
+      '</section>';
+  }
+
   const oldDashboard=dashboard;
   dashboard=function() {
     let base=oldDashboard();
@@ -128,7 +178,7 @@
     return base+'<section class="panel" style="margin-top:15px"><h2>Conti tra Stefano e Oleg</h2><strong>'+safe(debt)+'</strong>'+
       '<p class="hint">Saldo anticipi e rimborsi condivisi. Non rappresenta gli utili né il denaro in cassa.</p>'+
       '<div class="nv-actions"><button type="button" class="btn alt small" data-view="costs">Apri spese e rimborsi</button>'+
-      '<button type="button" class="btn alt small" data-view="sales">Apri vendite</button></div></section>';
+      '<button type="button" class="btn alt small" data-view="sales">Apri vendite</button></div></section>'+cashInDashboard();
   };
 
   const previousRender=render;
@@ -147,7 +197,7 @@
       content.innerHTML=content.innerHTML.replace('<h1>Costi condivisi</h1>','<h1>Spese e rimborsi</h1>')
         .replaceAll('nella sezione Costi','in Spese e rimborsi');
     }
-    if(['lots','watch','supplier','shipment','assets','costs','cash'].includes(state.view)) {
+    if(['lots','watch','supplier','shipment','assets','costs'].includes(state.view)) {
       content.insertAdjacentHTML('afterbegin',subnav(groupOf(state.view)));
       if(state.view==='shipment')content.insertAdjacentHTML('afterbegin','<p class="hint">Spedizioni precedenti: collegale a un articolo o lotto dalla scheda spedizione.</p>');
     }

@@ -1,4 +1,4 @@
-const CACHE = 'navra-offline-v10-accorpa-sync';
+const CACHE = 'navra-offline-v11-cassa-riepilogo';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
