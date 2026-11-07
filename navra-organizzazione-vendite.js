@@ -19,7 +19,14 @@
   const category = r => r?.data?.category || 'Orologi';
   const dateLocal = () => { const d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
   const costs = r => money(r.data?.purchase)+money(r.data?.purchaseShipping);
-  const margin = r => money(money(r.data?.salePrice)-costs(r)-money(r.data?.fees));
+  // Manutenzioni: registrate come un unico costo nella contabilità condivisa,
+  // collegate all'articolo. Non duplicarle in altre spese.
+  const isMaintenance = r => r.type === 'cost' && !r.deleted_at && r.data?.kind === 'expense' &&
+    !!r.data?.watchId && (r.data.maintenance === true ||
+      (r.data.category === 'Riparazione' && r.data.autoFromWatch !== true));
+  const maintenanceCents = article => active('cost').filter(r => isMaintenance(r) && r.data.watchId === article.id)
+    .reduce((sum,r)=>sum + Math.round((Number(r.data.amount)||0)*100),0);
+  const margin = r => money(money(r.data?.salePrice)-costs(r)-money(r.data?.fees)-maintenanceCents(r)/100);
   const share = r => { const v=r.data?.saleShareStefano; return v === '' || v == null ? Number(state.settings?.share ?? 50) : Number(v); };
   const saleMarket = r => r.data?.saleMarket || active('market').find(m=>m.id === r.data?.saleMarketId)?.data?.name || '';
   const PEOPLE = ['Stefano','Oleg'];
@@ -166,6 +173,11 @@
   dashboard=function() {
     let base=oldDashboard();
     const sold=sales();
+    // Il nucleo originale non conosce le manutenzioni; aggiorniamo il KPI
+    // usando lo stesso netto delle singole vendite, senza toccare i dati.
+    const actualNetCents=sold.reduce((a,r)=>a+Math.round(margin(r)*100),0);
+    base=base.replace(/(<div class="label">Utile netto vendite<\/div><div class="num">)[^<]*/,
+      (_all,prefix)=>prefix+safe(eur(actualNetCents/100)));
     // Fatturato e costo d'acquisto della SOLA merce venduta (spedizione inclusa).
     // I calcoli sono in centesimi per evitare errori floating point.
     const revenueCents=sold.reduce((sum,r)=>sum+Math.round((Number(r.data?.salePrice)||0)*100),0);
@@ -232,7 +244,7 @@
       b.textContent='Scarica Excel aggiornato';
     });
     if(state.view==='sync')content.insertAdjacentHTML('beforeend',
-      '<section class="panel"><h2>Esporta e salva</h2><p class="hint">Il report Excel contiene Articoli, Lotti, Vendite, Mercatini, Finanza, Spese, Cassa, Beni e foto.</p>'+
+      '<section class="panel"><h2>Esporta e salva</h2><p class="hint">Il report Excel contiene Articoli, Lotti, Vendite, Manutenzioni, Mercatini, Finanza, Spese, Cassa, Beni e foto.</p>'+
       '<button type="button" class="btn gold" data-navra-export-sales>Scarica Excel completo</button> '+
       '<button type="button" class="btn alt" data-action="export">Backup JSON con foto</button>'+
       '<p id="nv-export-status" class="status"></p></section>');
@@ -255,7 +267,7 @@
       <div class="field wide" id="nv-sale-market-row"><label>Mercatino / evento</label><select id="nv-sale-market"></select></div>
       <div class="field"><label>Quota utile a Stefano (%)</label><input id="nv-sale-share" type="number" min="0" max="100" step="1" required></div>
     </div>
-    <p class="hint">L’utile della vendita è: prezzo di vendita meno costo acquisto, spedizione acquisto e commissioni vendita. La quota di Stefano e Oleg è calcolata su questo risultato.</p>
+    <p class="hint">L’utile della vendita è: prezzo di vendita meno acquisto, spedizione acquisto, commissioni di vendita e manutenzioni registrate sull’articolo. La quota di Stefano e Oleg è calcolata su questo risultato.</p>
     <div class="actions"><button class="btn" type="submit">Salva vendita</button><button class="btn alt" type="button" id="nv-sale-close">Annulla</button><button class="btn warn" type="button" id="nv-sale-undo" hidden>Annulla vendita</button></div>
   </form>`;
   document.body.appendChild(dialog);
@@ -409,27 +421,92 @@
     const items=records.filter(r=>r.type==='watch'&&!r.deleted_at&&r.data?.status==='Venduto')
       .sort((a,b)=>(b.data.saleDate||'').localeCompare(a.data.saleDate||''));
     const headers=['Data vendita','Articolo','Categoria','Lotto','Venduto da','Cliente','Piattaforma','Mercatino',
-      'Prezzo vendita','Costo acquisto','Spedizione acquisto','Commissioni vendita','Utile netto vendita',
+      'Prezzo vendita','Costo acquisto','Spedizione acquisto','Commissioni vendita','Manutenzione','Utile netto vendita',
       'Quota Stefano (%)','Utile Stefano','Utile Oleg','Incasso ricevuto da','ID articolo'];
-    const widths=[18,35,22,25,18,26,19,30,20,19,21,20,22,20,20,20,20,39];
+    const widths=[18,35,22,25,18,26,19,30,20,19,21,20,21,22,20,20,20,20,39];
     const row0='<row r="1" ht="32" customHeight="1">'+stringCell('A1','Vendite NAVRA',1)+'</row>'+
       '<row r="2" ht="23" customHeight="1">'+stringCell('A2','Ogni articolo venduto compare una volta; costi e ricavi provengono dalla scheda articolo.',6)+'</row>';
     const head='<row r="4" ht="28" customHeight="1">'+headers.map((h,i)=>stringCell(exCol(i)+'4',h,2)).join('')+'</row>';
     const body=items.map((r,i)=>{
       const d=r.data||{},row=5+i,p=money(d.purchase),ship=money(d.purchaseShipping),fees=money(d.fees),
-        net=money(money(d.salePrice)-p-ship-fees),pct=d.saleShareStefano==null||d.saleShareStefano===''?Number(state.settings.share??50):Number(d.saleShareStefano);
+        maintenance=money(maintenanceCents(r)/100),net=margin(r),
+        pct=d.saleShareStefano==null||d.saleShareStefano===''?Number(state.settings.share??50):Number(d.saleShareStefano);
       const vals=[d.saleDate||'',title(r),d.category||'Orologi',lots.get(d.lotId)||'',d.soldBy||'',d.saleClient||'',
-        d.salePlatform||'',d.saleMarket||markets.get(d.saleMarketId)||'',money(d.salePrice),p,ship,fees,net,
+        d.salePlatform||'',d.saleMarket||markets.get(d.saleMarketId)||'',money(d.salePrice),p,ship,fees,maintenance,net,
         pct,money(net*pct/100),money(net*(100-pct)/100),d.saleCollectedBy||'',r.id];
       return '<row r="'+row+'" ht="22" customHeight="1">'+vals.map((v,j)=>
-        [8,9,10,11,12,14,15].includes(j)?valueCell(exCol(j)+row,v):
-        j===13?valueCell(exCol(j)+row,v,5):stringCell(exCol(j)+row,v)
+        [8,9,10,11,12,13,15,16].includes(j)?valueCell(exCol(j)+row,v):
+        j===14?valueCell(exCol(j)+row,v,5):stringCell(exCol(j)+row,v)
       ).join('')+'</row>';
     }).join('');
     const last=Math.max(5,4+items.length);
     const cols=widths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('');
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
-      '<dimension ref="A1:R'+last+'"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="17"/><cols>'+cols+'</cols><sheetData>'+row0+head+body+'</sheetData><mergeCells count="2"><mergeCell ref="A1:R1"/><mergeCell ref="A2:R2"/></mergeCells><autoFilter ref="A4:R'+last+'"/></worksheet>';
+      '<dimension ref="A1:S'+last+'"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="17"/><cols>'+cols+'</cols><sheetData>'+row0+head+body+'</sheetData><mergeCells count="2"><mergeCell ref="A1:S1"/><mergeCell ref="A2:S2"/></mergeCells><autoFilter ref="A4:S'+last+'"/></worksheet>';
+  }
+  // Articoli e Finanza: includere la manutenzione nei margini, senza
+  // sottrarla due volte dalle spese operative. I record sono invariati.
+  function patchMaintenanceFinancials(files,records){
+    const articles=records.filter(r=>r.type==='watch'&&!r.deleted_at);
+    const sold=articles.filter(r=>r.data?.status==='Venduto');
+    const soldMaintenance=sold.reduce((n,r)=>n+maintenanceCents(r),0);
+    const marginSold=sold.reduce((n,r)=>n+Math.round(margin(r)*100),0);
+    let sheet=text(files,'xl/worksheets/sheet1.xml');
+    sheet=sheet.replace(/A1:X(\d+)/g,'A1:Y$1')
+      .replace(/A4:X(\d+)/g,'A4:Y$1')
+      .replace('A1:X1','A1:Y1').replace('A2:X2','A2:Y2')
+      .replace('>Utile lordo vendita</t>','>Utile netto dopo manutenzione</t>')
+      .replace('</cols>','<col min="25" max="25" width="21" customWidth="1"/></cols>');
+    sheet=sheet.replace(/(<row r="4"[^>]*>)([\s\S]*?)(<\/row>)/,
+      (_m,a,b,z)=>a+b+stringCell('Y4','Manutenzione (€)',2)+z);
+    sheet=sheet.replace(/(<row r="(\d+)"[^>]*>)([\s\S]*?)(<\/row>)/g,
+      (m,a,r,b,z)=>{
+        const idx=Number(r)-5;
+        if(idx<0||idx>=articles.length)return m;
+        const article=articles[idx];
+        const net=article.data?.status==='Venduto'?margin(article):0;
+        const f='<f>IF(G'+r+'="Venduto",P'+r+'-O'+r+'-R'+r+'-Y'+r+',0)</f><v>'+money(net)+'</v>';
+        b=b.replace(new RegExp('(<c r="S'+r+'"[^>]*>)[\\s\\S]*?(<\\/c>)'),
+          (_m,start,end)=>start+f+end);
+        return a+b+valueCell('Y'+r,maintenanceCents(article)/100)+z;
+      });
+    files.set('xl/worksheets/sheet1.xml',sheet);
+    // Righe 8-9: margine vendite e spese operative (già comprensive dei costi
+    // di manutenzione); escludere dalle operative solo manutenzioni di venduti.
+    const oldOperating=records.filter(r=>r.type==='cost'&&!r.deleted_at&&r.data?.kind==='expense'&&
+      !['Acquisto orologio','Bene ammortizzabile'].includes(r.data.category))
+      .reduce((n,r)=>n+Math.round((Number(r.data.amount)||0)*100),0);
+    let finance=text(files,'xl/worksheets/sheet2.xml');
+    const change=(sheet,ref,value)=>sheet.replace(new RegExp('(<c r="'+ref+'"[^>]*>)[\\s\\S]*?(<\\/c>)'),
+      (_m,start,end)=>start+'<v>'+money(value)+'</v>'+end);
+    finance=change(finance,'B8',marginSold/100);
+    finance=change(finance,'B9',(oldOperating-soldMaintenance)/100);
+    finance=finance.replace('Fatturato - costo merce venduta - commissioni',
+      'Fatturato - acquisto - spedizione - commissioni - manutenzione merce venduta');
+    files.set('xl/worksheets/sheet2.xml',finance);
+  }
+  function maintenanceSheet(records){
+    const articles=new Map(records.filter(r=>r.type==='watch').map(r=>[r.id,r]));
+    const lots=new Map(records.filter(r=>r.type==='lot'&&!r.deleted_at).map(r=>[r.id,r.data?.name||'']));
+    const entries=records.filter(isMaintenance).sort((a,b)=>(b.data?.date||'').localeCompare(a.data?.date||''));
+    const headers=['Data','Articolo','Categoria','Lotto','Intervento','Costo (€)','Pagato da',
+      'Quota Stefano (%)','Quota Stefano (€)','Quota Oleg (€)','Note','ID articolo','ID intervento'];
+    const widths=[18,37,23,30,35,19,19,22,21,21,46,39,39];
+    const row0='<row r="1" ht="32" customHeight="1">'+stringCell('A1','Manutenzioni NAVRA',1)+'</row>'+ 
+      '<row r="2" ht="23" customHeight="1">'+stringCell('A2','Ogni intervento figura una sola volta nei costi e nel margine della vendita.',6)+'</row>';
+    const head='<row r="4" ht="28" customHeight="1">'+headers.map((h,i)=>stringCell(exCol(i)+'4',h,2)).join('')+'</row>';
+    const body=entries.map((r,i)=>{
+      const d=r.data||{},article=articles.get(d.watchId),row=i+5,pct=Number(d.shareStefano)||0,price=money(d.amount);
+      const vals=[d.date||'',article?title(article):'(Articolo eliminato)',article?.data?.category||'',
+        lots.get(article?.data?.lotId)||'',d.description||d.title||'',price,d.paidBy||'',pct,
+        money(price*pct/100),money(price*(100-pct)/100),d.notes||'',d.watchId||'',r.id];
+      return '<row r="'+row+'" ht="22" customHeight="1">'+vals.map((v,j)=>
+        [5,8,9].includes(j)?valueCell(exCol(j)+row,v):j===7?valueCell(exCol(j)+row,v,5):stringCell(exCol(j)+row,v)
+      ).join('')+'</row>';
+    }).join('');
+    const last=Math.max(5,4+entries.length),cols=widths.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('');
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<dimension ref="A1:M'+last+'"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView><sheetFormatPr defaultRowHeight="17"/><cols>'+cols+'</cols><sheetData>'+row0+head+body+'</sheetData><mergeCells count="2"><mergeCell ref="A1:M1"/><mergeCell ref="A2:M2"/></mergeCells><autoFilter ref="A4:M'+last+'"/></worksheet>';
   }
   function addSalesSheet(bytes,records){
     const files=unzip(bytes);
@@ -438,12 +515,14 @@
     if(!/<workbook\b[^>]*xmlns:r=/.test(workbook))workbook=workbook.replace('<workbook ',
       '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
     if(!workbook.includes('name="Lotti"')||!rels.includes('Id="rId10"'))throw Error('Aggiornamento Excel Lotti non riconosciuto.');
+    patchMaintenanceFinancials(files,records);
     files.set('xl/worksheets/sheet10.xml',saleSheet(records));
-    files.set('xl/workbook.xml',workbook.replace('</sheets>','<sheet name="Vendite" sheetId="10" r:id="rId11"/></sheets>'));
+    files.set('xl/worksheets/sheet11.xml',maintenanceSheet(records));
+    files.set('xl/workbook.xml',workbook.replace('</sheets>','<sheet name="Vendite" sheetId="10" r:id="rId11"/><sheet name="Manutenzioni" sheetId="11" r:id="rId12"/></sheets>'));
     files.set('xl/_rels/workbook.xml.rels',rels.replace('</Relationships>',
-      '<Relationship Id="rId11" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet10.xml"/></Relationships>'));
+      '<Relationship Id="rId11" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet10.xml"/><Relationship Id="rId12" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet11.xml"/></Relationships>'));
     files.set('[Content_Types].xml',text(files,'[Content_Types].xml').replace('</Types>',
-      '<Override PartName="/xl/worksheets/sheet10.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'));
+      '<Override PartName="/xl/worksheets/sheet10.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet11.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'));
     return zip(files);
   }
   window.NavraVendite=Object.freeze({patchExcel:addSalesSheet,utile:margin,quotaStefano:share});

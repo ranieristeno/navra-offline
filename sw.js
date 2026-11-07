@@ -1,8 +1,8 @@
-const CACHE = 'navra-offline-v13-dashboard-kpi';
+const CACHE = 'navra-offline-v14-manutenzioni';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
-  './navra-accorpa-impostazioni.js', './manifest.webmanifest', './icon.svg',
+  './navra-accorpa-impostazioni.js', './navra-manutenzioni.js', './manifest.webmanifest', './icon.svg',
   './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(
   caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
