@@ -1,9 +1,10 @@
-const CACHE = 'navra-offline-v10-accorpa-sync';
+const CACHE = 'navra-offline-v17-categorie-lotti';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
-  './navra-accorpa-impostazioni.js', './manifest.webmanifest', './icon.svg',
-  './icon-180.png', './icon-192.png', './icon-512.png'];
+  './navra-accorpa-impostazioni.js', './navra-manutenzioni.js',
+  './navra-elimina-lotti.js', './navra-vendite-analisi.js', './navra-categorie-lotti.js',
+  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(
   caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
 ));
