@@ -1,7 +1,7 @@
-/* NAVRA Analisi Acquisti categorie + BI Vendite + ricerca rapida articolo in vendita.
+/* NAVRA v21: Acquisti esplorabili + BI Acquisti e Vendite semplificate + ricerca rapida vendita.
    Da caricare DOPO navra-categorie-lotti.js e navra-vendite-analisi.js.
    Solo interfaccia: nessuna modifica a record, schema, prezzi, Firebase o sincronizzazione.
-   2026-11 v20 */
+   2026-11 v21 */
 'use strict';
 (() => {
   if (typeof state === 'undefined' || typeof render !== 'function') return;
@@ -24,6 +24,7 @@
   const delta = (now,old) => old === 0 ? 'n.d. (nessuna base)' : (now >= old ? '+' : '') + pct(now,old);
   const stat = (name,value,info='') => `<div class="nv-bi-stat"><small>${text(name)}</small><strong>${text(value)}</strong>${info?`<small>${text(info)}</small>`:''}</div>`;
   let purchaseYear = current().y, purchaseSearch = '', purchaseCategory = '', purchasePayer = '';
+  let purchaseBiYear = current().y, purchaseBiCategory = '';
   let salesYear = current().y, salesCategory = '', salesChannel = '';
 
   // Acquisitions are sourced from each lot ONCE plus independently bought articles.
@@ -100,7 +101,10 @@
       for(const day of days) {
         const onDay=subset.filter(r=>r.date===day);
         html+=`<details class="nv-bi-day"><summary><span>${text(day.slice(8,10)+'/'+day.slice(5,7))} · ${type==='buy'?qty(onDay):onDay.length} ${type==='buy'?'articoli':'vendite'}</span><span>${cash(sum(onDay))}${type==='sale'?` · Utile ${cash(sum(onDay,'profit'))}`:''}</span></summary>`;
-        for(const r of onDay) html+=`<div class="nv-bi-row"><span><strong>${text(r.title)}</strong><small>${text(r.category)} · ${text(type==='buy'?(r.kind+' · '+r.payer+(r.supplier?' · '+r.supplier:'')):(r.channel+(r.client?' · '+r.client:'')))}</small></span><strong>${cash(r.amount)}</strong></div>`;
+        for(const r of onDay) {
+          const open=type==='buy'?`<button type="button" class="btn alt small" ${r.kind==='Lotto'?'data-nv-buy-lot':'data-nv-buy-watch'}="${text(r.source)}">Apri ${r.kind==='Lotto'?'lotto':'articolo'}</button>`:'';
+          html+=`<div class="nv-bi-row"><span><strong>${text(r.title)}</strong><small>${text(r.category)} · ${text(type==='buy'?(r.kind+' · '+r.payer+(r.supplier?' · '+r.supplier:'')):(r.channel+(r.client?' · '+r.client:'')))}</small></span><div class="nv-bi-row-actions"><strong>${cash(r.amount)}</strong>${open}</div></div>`;
+        }
         html+='</details>';
       }
       html+='</details>';
@@ -198,13 +202,40 @@
       </div>
       <div class="nv-purchase-break-head"><strong>Dettaglio per categoria</strong>
         <button type="button" class="btn alt small" id="nv-purchase-reset">Azzera filtri</button></div>
+      <p class="hint" style="margin:0 0 10px">Tocca una categoria per vedere lotti e articoli. Apri un lotto per visualizzare tutte le sue schede.</p>
       <div id="nv-purchase-results"></div>
-      <p class="hint">La spesa include acquisto della merce, spedizione di acquisto e altre spese attribuite ai lotti. Ogni lotto viene contato una sola volta, senza duplicare il costo degli articoli collegati. Sono compresi anche gli articoli già venduti.</p>
+      <p class="hint">La spesa include acquisto, spedizione e altre spese dei lotti. Nessun costo viene contato due volte; sono compresi anche gli articoli già venduti.</p>
     </section>`;
   }
+  function purchaseDetail(rows,category) {
+    const lots=new Map(alive('lot').map(r=>[r.id,r]));
+    const watches=alive('watch');
+    const sections=[];
+    const unique=[...new Map(rows.map(r=>[r.source,r])).values()];
+    for(const entry of unique){
+      const lot=lots.get(entry.source);
+      if(lot){
+        const d=lot.data||{};
+        const specific=!!String(d.category||'').trim()&&!['misto','lotto misto'].includes(norm(d.category));
+        // Un lotto misto viene ripartito per categoria con i soli articoli pertinenti.
+        const units=watches.filter(w=>w.data?.lotId===lot.id &&
+          (specific || norm(w.data?.category||'Orologi')===norm(category)));
+        sections.push(`<details class="nv-purchase-lot"><summary><span><strong>${text(d.name||'Lotto senza nome')}</strong><small>${entry.qty} articoli · ${text(d.supplier||'Fornitore non indicato')}</small></span><strong>${cash(entry.amount)}</strong></summary>
+          <div class="nv-purchase-inner"><button type="button" class="btn alt small" data-nv-buy-lot="${text(lot.id)}">Apri scheda lotto</button>
+          ${units.map(w=>{const a=w.data||{},name=[a.brand,a.model].filter(Boolean).join(' ')||'Articolo da catalogare';
+            return `<div class="nv-purchase-unit"><span><strong>${text(name)}</strong><small>${text(a.status==='Venduto'?'Venduto':'In stock')} · ${text(a.category||'Orologi')}${a.lotIndex?' · #'+text(a.lotIndex):''}</small></span><button class="btn alt small" type="button" data-nv-buy-watch="${text(w.id)}">Apri</button></div>`;
+          }).join('')||'<p class="hint">Schede individuali non ancora disponibili per questo lotto.</p>'}</div></details>`);
+      } else {
+        const article=watches.find(w=>w.id===entry.source);
+        const d=article?.data||{};
+        const name=[d.brand,d.model].filter(Boolean).join(' ')||entry.title||'Articolo';
+        sections.push(`<div class="nv-purchase-unit"><span><strong>${text(name)}</strong><small>${text(d.status==='Venduto'?'Venduto':'In stock')} · ${text(entry.supplier||'')}</small></span><button class="btn alt small" type="button" data-nv-buy-watch="${text(entry.source)}">Apri articolo</button></div>`);
+      }
+    }
+    return sections.join('')||'<p class="hint">Nessun articolo associato a questa categoria.</p>';
+  }
   function updatePurchase() {
-    const panel=document.getElementById('nv-purchase-bi');
-    if(!panel)return;
+    const panel=document.getElementById('nv-purchase-bi');if(!panel)return;
     const terms=norm(purchaseSearch).split(/\s+/).filter(Boolean);
     const rows=purchaseCategoryRows().filter(r=>(!purchaseCategory||norm(r.category)===norm(purchaseCategory))&&
       terms.every(term=>r.hay.includes(term)));
@@ -216,17 +247,51 @@
     put('nv-purchase-count',purchases.toLocaleString('it-IT'));
     const groups=new Map();
     for(const r of rows){
-      const k=norm(r.category),g=groups.get(k)||{name:r.category,qty:0,amount:0,ids:new Set()};
-      g.qty+=r.qty;g.amount+=r.amount;g.ids.add(r.source);groups.set(k,g);
+      const k=norm(r.category),g=groups.get(k)||{name:r.category,qty:0,amount:0,ids:new Set(),rows:[]};
+      g.qty+=r.qty;g.amount+=r.amount;g.ids.add(r.source);g.rows.push(r);groups.set(k,g);
     }
     const sorted=[...groups.values()].sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'it'));
     const max=Math.max(1,...sorted.map(g=>g.amount));
     const target=document.getElementById('nv-purchase-results');
     if(target)target.innerHTML=sorted.length?sorted.map(g=>
-      `<div class="nv-purchase-cat-row"><div class="nv-purchase-cat-head"><strong>${text(g.name)}</strong><small>${g.qty} ${g.qty===1?'articolo':'articoli'}</small></div>`+
+      `<details class="nv-purchase-cat-row"><summary class="nv-purchase-cat-toggle"><div class="nv-purchase-cat-head"><strong>${text(g.name)}</strong><small>${g.qty} ${g.qty===1?'articolo':'articoli'}</small></div>`+
       `<div class="nv-purchase-cat-amounts"><span>Acquisti: <strong>${text(cash(g.amount))}</strong></span><span>${g.ids.size} ${g.ids.size===1?'acquisto / lotto':'acquisti / lotti'}</span></div>`+
-      `<div class="nv-purchase-cat-bar"><i style="width:${Math.max(0,Math.min(100,g.amount/max*100)).toFixed(2)}%"></i></div></div>`
+      `<div class="nv-purchase-cat-bar"><i style="width:${Math.max(0,Math.min(100,g.amount/max*100)).toFixed(2)}%"></i></div></summary>`+
+      `<div class="nv-purchase-entries">${purchaseDetail(g.rows,g.name)}<button type="button" class="btn alt small" data-nv-buy-stock="${text(g.name)}">Vedi in Articoli / Stock</button></div></details>`
     ).join(''):`<p class="hint">Nessun acquisto trovato${purchaseCategory?' per la categoria '+text(purchaseCategory):''}. Controlla che la categoria sia assegnata agli articoli o ai lotti.</p>`;
+  }
+  function purchaseBiRows(){
+    const index=new Map([...alive('lot'),...alive('watch')].map(r=>[r.id,r]));
+    return purchaseCategoryRows().map(r=>{
+      const record=index.get(r.source),d=record?.data||{};
+      return {...r,date:record?.type==='lot'?(d.purchaseDate||''):(d.buyDate||''),kind:record?.type==='lot'?'Lotto':'Articolo'};
+    });
+  }
+  function purchaseBiPanel(){
+    const rows=purchaseBiRows(),years=yearsOf(rows);
+    if(!years.includes(purchaseBiYear))purchaseBiYear=current().y;
+    const cats=[...new Set(rows.map(r=>r.category))].sort((a,b)=>a.localeCompare(b,'it'));
+    const opts=(items,selected,none)=>`<option value="">${none}</option>`+items.map(c=>`<option value="${text(c)}"${c===selected?' selected':''}>${text(c)}</option>`).join('');
+    return `<section class="panel" id="nv-purchase-period-bi"><h2>BI Acquisti</h2>
+      <p class="hint">Investimenti in merce, con dettaglio per mese e per giorno. Lotti e articoli collegati non vengono conteggiati due volte.</p>
+      <div class="nv-bi-filters"><div class="field"><label for="nv-purchase-bi-year">Anno</label><select id="nv-purchase-bi-year">${years.map(y=>`<option value="${y}"${y===purchaseBiYear?' selected':''}>${y}</option>`).join('')}</select></div>
+      <div class="field"><label for="nv-purchase-bi-category">Categoria</label><select id="nv-purchase-bi-category">${opts(cats,purchaseBiCategory,'Tutte le categorie')}</select></div></div>
+      <div id="nv-purchase-period-result"></div></section>`;
+  }
+  function updatePurchaseBi(){
+    const root=document.getElementById('nv-purchase-period-result');if(!root)return;
+    const all=purchaseBiRows().filter(r=>!purchaseBiCategory||norm(r.category)===norm(purchaseBiCategory));
+    const dated=onlyDates(all),selected=dated.filter(r=>r.date.startsWith(String(purchaseBiYear)+'-'));
+    const undated=all.filter(r=>!validDate(r.date));
+    const distinct=new Set(selected.map(r=>r.source)).size;
+    root.innerHTML=`<div class="nv-bi-stats">${stat('Spesa '+purchaseBiYear,cash(sum(selected)))}
+      ${stat('Articoli acquistati',qty(selected).toLocaleString('it-IT'))}
+      ${stat('Lotti / acquisti',distinct.toLocaleString('it-IT'))}</div>
+      ${undated.length?`<p class="nv-bi-warning">${new Set(undated.map(r=>r.source)).size} acquisti senza data esclusi dall'analisi temporale. Li trovi nel Riepilogo Acquisti.</p>`:''}
+      <h3>Acquisti per mese e giorno · ${purchaseBiYear}</h3>
+      <p class="hint">Tocca il mese, poi il giorno, per vedere i singoli acquisti.</p>
+      <div class="nv-bi-months">${groupMonths(selected,purchaseBiYear,'buy')}</div>
+      <h3>Investimento per categoria · ${purchaseBiYear}</h3>${catBreakdown(selected,'buy')}`;
   }
   function salesBi() {
     const all=soldRows(), years=yearsOf(all);if(!years.includes(salesYear))salesYear=current().y;
@@ -239,61 +304,85 @@
       <div class="field"><label for="nv-bi-sales-channel">Canale</label><select id="nv-bi-sales-channel">${opts(channels,salesChannel,'Tutti')}</select></div></div>
       <div id="nv-bi-sales-result"></div></section>`;
   }
-  // Stock rotation based on inventory held during the selected period, at acquisition cost.
-  // Require dated acquisitions and dated sales; otherwise show n.d. rather than an invented ratio.
-  function rotationAtCost(year) {
-    const c=current(), end=year===c.y?c.date:`${year}-12-31`, start=`${year}-01-01`;
-    const time = day => Date.parse(day+'T00:00:00Z');
-    const next = t => t+86400000, startMs=time(start), endMs=next(time(end));
-    const days=(endMs-startMs)/86400000;
-    const all=alive('watch'), incomplete=all.some(w=>{
-      const d=w.data||{}, cost=moneyCents(d.purchase)+moneyCents(d.purchaseShipping);
-      return cost>0 && (!validDate(d.buyDate)||(d.status==='Venduto'&&!validDate(d.saleDate)));
-    });
-    let weighted=0,cogs=0,heldSold=0,soldCount=0,oldStock=0,knownStock=0;
-    for(const r of all) {
-      const d=r.data||{}, cost=moneyCents(d.purchase)+moneyCents(d.purchaseShipping);
-      if(!validDate(d.buyDate)||cost<=0) continue;
-      const buy=time(d.buyDate),sale=validDate(d.saleDate)&&d.status==='Venduto'?time(d.saleDate):Infinity;
-      if(buy>=endMs)continue;
-      const left=Math.max(startMs,buy),right=Math.min(endMs,next(sale));
-      if(right>left) weighted+=cost*(right-left)/86400000;
-      if(sale>=startMs&&sale<endMs) {
-        cogs+=cost;soldCount++;
-        heldSold+=Math.max(0,(sale-buy)/86400000);
-      }
-      if(d.status!=='Venduto'&&d.buyDate<=end) {
-        knownStock++;
-        if((endMs-buy)/86400000>180)oldStock++;
-      }
+  // "Rotazione" pratica per rivendita: velocita' di vendita realizzata negli ultimi 90 giorni.
+  // Questo NON e' l'indice contabile COGS / magazzino medio: misura pezzi venduti al giorno.
+  function movementByCategory(){
+    const end=current().date;
+    const first=new Date(Date.parse(end+'T12:00:00Z')-89*86400000).toISOString().slice(0,10);
+    const grouped=new Map();
+    const item=(cat)=>{
+      const name=String(cat||'Orologi').trim()||'Orologi',k=norm(name);
+      if(!grouped.has(k))grouped.set(k,{name,sold:0,stock:0,products:new Map()});
+      return grouped.get(k);
+    };
+    for(const record of alive('watch')){
+      const d=record.data||{},group=item(d.category),productName=[d.brand,d.model].filter(Boolean).join(' ')||'Articolo senza nome';
+      const key=norm(productName),product=group.products.get(key)||{name:productName,sold:0,stock:0};
+      const isSold=d.status==='Venduto';
+      if(!isSold){group.stock++;product.stock++;}
+      else if(validDate(d.saleDate)&&d.saleDate>=first&&d.saleDate<=end){group.sold++;product.sold++;}
+      group.products.set(key,product);
     }
-    const avgStock=weighted/days;
-    const turns=(!incomplete&&avgStock>0)?cogs/avgStock:null;
-    return {turns,avgDays:soldCount?Math.round(heldSold/soldCount):null,oldStock,knownStock,incomplete};
+    return [...grouped.values()].filter(g=>g.sold>0||g.stock>0).sort((a,b)=>b.sold-a.sold || a.name.localeCompare(b.name,'it'));
+  }
+  function movementLabel(sold) {
+    if(!sold)return 'Nessuna vendita negli ultimi 90 giorni';
+    const perDay=sold/90;
+    if(perDay>=1)return perDay.toLocaleString('it-IT',{maximumFractionDigits:2})+' articoli/giorno';
+    return '1 articolo ogni '+(90/sold).toLocaleString('it-IT',{maximumFractionDigits:1})+' giorni';
+  }
+  function movementPanel(){
+    const all=movementByCategory().filter(g=>!salesCategory||norm(g.name)===norm(salesCategory));
+    return `<h3>Rotazione / velocità di vendita</h3>
+      <p class="hint">Media delle unità effettivamente vendute negli ultimi 90 giorni. Non è il tempo trascorso tra acquisto e vendita. La copertura è una stima basata sul ritmo recente e sullo stock attuale. La rotazione usa tutti i canali, anche quando filtri anno o piattaforma.</p>
+      ${all.map(g=>{
+        const cover=g.sold?(90*g.stock/g.sold).toLocaleString('it-IT',{maximumFractionDigits:0})+' giorni':'n.d.';
+        const products=[...g.products.values()].sort((a,b)=>b.sold-a.sold||b.stock-a.stock).slice(0,25);
+        return `<details class="nv-movement-item"><summary><span><strong>${text(g.name)}</strong><small>${g.sold} venduti in 90 giorni · ${g.stock} in stock</small></span><strong>${text(movementLabel(g.sold))}</strong></summary>
+          <div class="nv-movement-inside"><p><strong>Copertura stock:</strong> ${text(cover)}${g.sold?' al ritmo attuale':''}</p>
+          ${products.map(p=>`<div class="nv-movement-product"><span>${text(p.name)}<small>${p.sold} venduti · ${p.stock} disponibili</small></span><strong>${text(p.sold?movementLabel(p.sold):'Nessuna vendita')}</strong></div>`).join('')}</div></details>`;
+      }).join('')||'<p class="hint">Nessuna categoria in magazzino o nello storico.</p>'}`;
   }
   function updateSalesBI() {
     const target=document.getElementById('nv-bi-sales-result');if(!target)return;
     const all=soldRows().filter(r=>(!salesCategory||r.category===salesCategory)&&(!salesChannel||r.channel===salesChannel));
-    const valid=onlyDates(all), undated=all.filter(r=>!validDate(r.date)), p=periodStats(valid,salesYear);
+    const valid=onlyDates(all),undated=all.filter(r=>!validDate(r.date));
     const yr=valid.filter(r=>r.date.startsWith(String(salesYear)+'-'));
-    const rotation=rotationAtCost(salesYear);
-    target.innerHTML=`<div class="nv-bi-stats">${stat('Fatturato '+(p.historical?'anno':'YTD'),cash(p.ytd))}
-      ${stat('YTD vs anno scorso',delta(p.ytd,p.prior))}
-      ${stat('Fatturato '+(p.historical?'dicembre':'MTD'),cash(p.monthValue))}
-      ${stat('MoM',delta(p.monthValue,p.prevMonthValue))}
-      ${stat('Utile vendite',cash(sum(yr,'profit')))}
-      ${stat('Articoli venduti',yr.length.toLocaleString('it-IT'))}
-      ${stat('Rotazione magazzino a costo',rotation.turns==null?'n.d.':rotation.turns.toLocaleString('it-IT',{maximumFractionDigits:2,minimumFractionDigits:2})+'x','Su giacenza media ponderata nel periodo')}
-      ${stat('Giorni medi prima della vendita',rotation.avgDays==null?'n.d.':rotation.avgDays+' giorni')}
-      ${stat('Articoli fermi oltre 180 giorni',rotation.oldStock.toLocaleString('it-IT'))}</div>
-      ${rotation.incomplete?'<p class="nv-bi-warning">Rotazione non calcolabile: completa le date di acquisto e vendita degli articoli. La giacenza storica esclude le schede eliminate.</p>':''}
-      ${undated.length?`<p class="nv-bi-warning">${undated.length} vendite senza data escluse dai confronti.</p>`:''}
-      <h3>Fatturato per mese e giorno · ${salesYear}</h3><p class="hint">Espandi un mese e un giorno per vedere le singole vendite.</p>
+    target.innerHTML=`<div class="nv-bi-stats">${stat('Fatturato '+salesYear,cash(sum(yr)))}
+      ${stat('Utile '+salesYear,cash(sum(yr,'profit')))}
+      ${stat('Articoli venduti',yr.length.toLocaleString('it-IT'))}</div>
+      ${undated.length?`<p class="nv-bi-warning">${undated.length} vendite senza data escluse dai confronti per anno.</p>`:''}
+      ${movementPanel()}
+      <h3>Fatturato per mese e giorno · ${salesYear}</h3>
+      <p class="hint">Espandi un mese e un giorno per vedere le singole vendite.</p>
       <div class="nv-bi-months">${groupMonths(yr,salesYear,'sale')}</div>
       <h3>Fatturato per categoria · ${salesYear}</h3>${catBreakdown(yr,'sale')}`;
   }
 
   const style=document.createElement('style');style.textContent=`
+    .nv-purchase-top-tabs{margin:0 0 12px}
+    .nv-purchase-cat-toggle{cursor:pointer;list-style:none;display:block;position:relative;padding-right:20px}
+    .nv-purchase-cat-toggle::-webkit-details-marker,.nv-purchase-lot>summary::-webkit-details-marker,.nv-movement-item>summary::-webkit-details-marker{display:none}
+    .nv-purchase-cat-toggle:after{content:'▸';position:absolute;right:0;top:0;color:var(--gold)}
+    .nv-purchase-cat-row[open]>.nv-purchase-cat-toggle:after{content:'▾'}
+    .nv-purchase-entries{margin:12px 0 3px;padding:10px 12px;background:var(--paper);border-radius:10px}
+    .nv-purchase-lot{border-bottom:1px solid var(--line);padding:8px 0}
+    .nv-purchase-lot>summary{cursor:pointer;display:flex;justify-content:space-between;gap:12px;align-items:start}
+    .nv-purchase-lot>summary small,.nv-purchase-unit small{display:block;font-size:12px;color:var(--muted);margin-top:4px}
+    .nv-purchase-lot>summary>strong{white-space:nowrap}
+    .nv-purchase-inner{padding:9px 0 3px 12px}
+    .nv-purchase-unit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+    .nv-purchase-unit span{min-width:0;overflow-wrap:anywhere}
+    .nv-purchase-entries>.btn{margin-top:14px}
+    .nv-movement-item{border-bottom:1px solid var(--line);padding:12px 0}
+    .nv-movement-item>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;list-style:none}
+    .nv-movement-item>summary>span{flex:1;min-width:0}
+    .nv-movement-item>summary small,.nv-movement-product small{display:block;font-size:12px;color:var(--muted);margin-top:5px}
+    .nv-movement-item>summary>strong{font-size:13px;text-align:right;max-width:50%;overflow-wrap:anywhere}
+    .nv-movement-inside{margin:10px 0 0;padding:9px 12px;background:var(--paper);border-radius:9px}
+    .nv-movement-inside>p{font-size:13px;margin:4px 0 10px}
+    .nv-movement-product{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
+    .nv-movement-product strong{text-align:right;min-width:90px;font-size:12px}
     #nv-purchase-bi{margin:14px 0 17px}
     #nv-purchase-bi h2{margin:0 0 12px;font-size:18px}
     #nv-purchase-bi .nv-purchase-search-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:9px}
@@ -331,6 +420,7 @@
     .nv-bi-day>summary{font-size:13px;flex-wrap:wrap}.nv-bi-row{padding:12px 8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
     .nv-bi-row:last-child{border-bottom:0}.nv-bi-row small{display:block;font-size:12px;color:var(--muted);margin-top:3px}
     .nv-bi-row>span{min-width:0;flex:1}.nv-bi-row>strong{white-space:nowrap}
+    .nv-bi-row-actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px;white-space:nowrap}
     .nv-bi-warning{padding:10px 12px;border-radius:8px;background:#fff4d7;color:#664c11;font-size:13px}
     #nv-sales-bi h3,#nv-purchase-bi h3{font-size:16px;margin:20px 0 10px}
     #nv-sale-item.nv-fast-select-hidden{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}
@@ -346,7 +436,10 @@
   render=function(){
     previousRender();const content=document.getElementById('content');if(!content)return;
     if(state.view==='acquisti') {
-      content.insertAdjacentHTML('beforeend',purchasePanel());updatePurchase();
+      const bi=state.navraAcquistiTab==='bi';
+      const tabs=`<div class="nv-tabs nv-purchase-top-tabs"><button type="button" data-nv-purchase-tab="overview" class="${bi?'':'active'}">Riepilogo Acquisti</button><button type="button" data-nv-purchase-tab="bi" class="${bi?'active':''}">BI Acquisti</button></div>`;
+      if(bi){content.innerHTML=tabs+purchaseBiPanel();updatePurchaseBi();}
+      else {content.insertAdjacentHTML('afterbegin',tabs);content.insertAdjacentHTML('beforeend',purchasePanel());updatePurchase();}
     }
     if(state.view==='sales'){
       const tabs=content.querySelector('.nv-tabs');
@@ -365,6 +458,8 @@
     if(e.target.id==='nv-purchase-year'){purchaseYear=Number(e.target.value);updatePurchase();}
     if(e.target.id==='nv-purchase-cat'){purchaseCategory=e.target.value;updatePurchase();}
     if(e.target.id==='nv-purchase-payer'){purchasePayer=e.target.value;updatePurchase();}
+    if(e.target.id==='nv-purchase-bi-year'){purchaseBiYear=Number(e.target.value);updatePurchaseBi();}
+    if(e.target.id==='nv-purchase-bi-category'){purchaseBiCategory=e.target.value;updatePurchaseBi();}
     if(e.target.id==='nv-bi-sales-year'){salesYear=Number(e.target.value);updateSalesBI();}
     if(e.target.id==='nv-bi-sales-cat'){salesCategory=e.target.value;updateSalesBI();}
     if(e.target.id==='nv-bi-sales-channel'){salesChannel=e.target.value;updateSalesBI();}
@@ -378,6 +473,27 @@
   });
   document.getElementById('content')?.addEventListener('input',e=>{
     if(e.target.id==='nv-purchase-search'){purchaseSearch=e.target.value;updatePurchase();}
+  });
+
+  document.getElementById('content')?.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-nv-purchase-tab],[data-nv-buy-lot],[data-nv-buy-watch],[data-nv-buy-stock]');
+    if(!btn)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    if(btn.dataset.nvPurchaseTab){state.navraAcquistiTab=btn.dataset.nvPurchaseTab;render();return;}
+    if(btn.dataset.nvBuyLot){
+      const id=btn.dataset.nvBuyLot;
+      if(!alive('lot').some(r=>r.id===id))return alert('Lotto non disponibile su questo dispositivo. Sincronizza NAVRA.');
+      state.navraLotId=id;state.view='lots';state.search='';render();return;
+    }
+    if(btn.dataset.nvBuyWatch){
+      const id=btn.dataset.nvBuyWatch;
+      if(!alive('watch').some(r=>r.id===id))return alert('Articolo non disponibile. Sincronizza NAVRA.');
+      editModal('watch',id);return;
+    }
+    if(btn.dataset.nvBuyStock){
+      state.navraCategoryFilter=btn.dataset.nvBuyStock;
+      state.view='watch';state.search='';render();return;
+    }
   });
 
   // Replace the huge native article selector with searchable suggestions. Preserve the
