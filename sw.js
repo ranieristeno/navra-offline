@@ -1,4 +1,4 @@
-const CACHE = 'navra-offline-v21-link-bi-velocity';
+const CACHE = 'navra-offline-v22-exclude-sold-purchase-rotation';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
