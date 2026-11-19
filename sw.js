@@ -1,10 +1,11 @@
-const CACHE = 'navra-offline-v22-exclude-sold-purchase-rotation';
+const CACHE = 'navra-offline-v23-sales-category-drilldown';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
   './navra-accorpa-impostazioni.js', './navra-manutenzioni.js',
   './navra-elimina-lotti.js', './navra-vendite-analisi.js',
   './navra-categorie-lotti.js', './navra-bi-acquisti-vendite.js',
+  './navra-vendite-categorie.js',
   './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => event.waitUntil(
   caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
