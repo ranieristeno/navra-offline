@@ -1,4 +1,4 @@
-const CACHE = 'navra-offline-v19-bi-acquisti-vendite';
+const CACHE = 'navra-offline-v20-acquisti-categorie';
 const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',

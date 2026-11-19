@@ -1,7 +1,7 @@
-/* NAVRA BI Acquisti + BI Vendite + ricerca rapida articolo in vendita.
+/* NAVRA Analisi Acquisti categorie + BI Vendite + ricerca rapida articolo in vendita.
    Da caricare DOPO navra-categorie-lotti.js e navra-vendite-analisi.js.
    Solo interfaccia: nessuna modifica a record, schema, prezzi, Firebase o sincronizzazione.
-   2026-11 v1.0 */
+   2026-11 v20 */
 'use strict';
 (() => {
   if (typeof state === 'undefined' || typeof render !== 'function') return;
@@ -117,37 +117,116 @@
       `<div class="nv-bi-row"><span><strong>${text(c.name)}</strong><small>${c.count} articoli${type==='sale'?` · Utile ${cash(c.profit)}`:''}</small></span><strong>${cash(c.total)}</strong></div>`
     ).join('')||'<p class="hint">Nessuna categoria nel periodo.</p>';
   }
+  // Acquisti: dashboard per categoria come la schermata di Vendite.
+  // Il lotto viene conteggiato UNA volta; in caso di lotto misto senza categoria specifica
+  // la ripartizione usa i costi attribuiti alle singole schede, senza duplicare i totali.
+  function purchaseCategoryRows() {
+    const lots=alive('lot');
+    const byLot=new Set(lots.map(l=>l.id));
+    const children=new Map();
+    for(const w of alive('watch')) {
+      const id=w.data?.lotId;
+      if(!id)continue;
+      if(!children.has(id))children.set(id,[]);
+      children.get(id).push(w);
+    }
+    const rows=[];
+    const makeRow=(id,cat,amount,qty,name,payer,supplier,extra='')=>({
+      id,category:String(cat||'Senza categoria').trim()||'Senza categoria',
+      amount,qty,source:id,title:name,payer,supplier,
+      hay:norm([name,cat,payer,supplier,extra].join(' '))
+    });
+    for(const l of lots){
+      const d=l.data||{},kids=children.get(l.id)||[];
+      const total=moneyCents(d.totalPurchase)+moneyCents(d.shippingCost)+moneyCents(d.otherCosts);
+      const qty=Math.max(1,Number(d.quantity)||kids.length||1);
+      const cat=String(d.category||'').trim();
+      const name=d.name||'Lotto senza nome',payer=d.paidBy||'',supplier=d.supplier||'';
+      const searchable=[d.notes,...kids.map(w=>[w.data?.brand,w.data?.model,w.data?.reference,w.data?.category].join(' '))].join(' ');
+      const catIsSpecific=cat&&!['misto','lotto misto'].includes(norm(cat));
+      if(catIsSpecific||!kids.length){
+        rows.push(makeRow(l.id,catIsSpecific?cat:'Senza categoria',total,qty,name,payer,supplier,searchable));
+        continue;
+      }
+      const groups=new Map();
+      for(const w of kids){
+        const category=String(w.data?.category||'Orologi').trim()||'Orologi';
+        const key=norm(category);
+        const amount=moneyCents(w.data?.purchase)+moneyCents(w.data?.purchaseShipping);
+        const g=groups.get(key)||{category,qty:0,weight:0};
+        g.qty++;g.weight+=Math.max(0,amount);groups.set(key,g);
+      }
+      const gs=[...groups.values()];
+      const weights=gs.reduce((s,g)=>s+g.weight,0);
+      let allocated=0;
+      for(let i=0;i<gs.length;i++){
+        const g=gs[i],last=i===gs.length-1;
+        const amount=last?total-allocated:Math.round(total*(weights?g.weight/weights:g.qty/kids.length));
+        allocated+=amount;
+        rows.push(makeRow(l.id,g.category,amount,g.qty,name,payer,supplier,searchable));
+      }
+      // Quantita senza una scheda ancora collegata: non nasconderla nelle statistiche.
+      if(qty>kids.length) rows.push(makeRow(l.id,'Da classificare',0,qty-kids.length,name,payer,supplier,searchable));
+    }
+    for(const w of alive('watch')){
+      const d=w.data||{};
+      if(d.lotId&&byLot.has(d.lotId))continue;
+      const label=[d.brand,d.model].filter(Boolean).join(' ')||'Articolo senza nome';
+      rows.push(makeRow(w.id,d.category||'Orologi',moneyCents(d.purchase)+moneyCents(d.purchaseShipping),1,
+        label,d.purchaseBy||d.boughtBy||'',d.supplier||'',[d.reference,d.serial,d.notes].join(' ')));
+    }
+    return rows;
+  }
   function purchasePanel() {
-    const all=purchaseRows(), dated=onlyDates(all), years=yearsOf(dated);
-    if(!years.includes(purchaseYear)) purchaseYear=current().y;
-    const cats=[...new Set(all.map(r=>r.category))].sort((a,b)=>a.localeCompare(b,'it'));
-    const payers=[...new Set(all.map(r=>r.payer))].sort((a,b)=>a.localeCompare(b,'it'));
-    const options=(items,selected,blank)=>`<option value="">${text(blank)}</option>`+items.map(x=>`<option value="${text(x)}"${x===selected?' selected':''}>${text(x)}</option>`).join('');
-    return `<section class="panel" id="nv-purchase-bi"><div class="head"><h2>BI Acquisti</h2></div>
-      <p class="hint">Spese di acquisto e investimento in merce, senza contare due volte gli articoli generati dai lotti. Beni, manutenzioni e mercatini restano in Beni e spese.</p>
-      <div class="nv-bi-filters">
-      <div class="field"><label for="nv-purchase-year">Anno</label><select id="nv-purchase-year">${years.map(y=>`<option value="${y}"${y===purchaseYear?' selected':''}>${y}</option>`).join('')}</select></div>
-      <div class="field"><label for="nv-purchase-search">Cerca acquisti</label><input id="nv-purchase-search" type="search" placeholder="Lotto, Casio, fornitore…" value="${text(purchaseSearch)}"></div>
-      <div class="field"><label for="nv-purchase-cat">Categoria</label><select id="nv-purchase-cat">${options(cats,purchaseCategory,'Tutte')}</select></div>
-      <div class="field"><label for="nv-purchase-payer">Pagato da</label><select id="nv-purchase-payer">${options(payers,purchasePayer,'Tutti')}</select></div>
-      </div><div id="nv-purchase-results"></div></section>`;
+    const categories=[...new Set(['Orologi','Orologi Cinesi','Cinturini','Borse','Occhiali',
+      ...purchaseCategoryRows().map(r=>r.category),
+      ...alive('watch').map(r=>r.data?.category).filter(Boolean),
+      ...alive('lot').map(r=>r.data?.category).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'it'));
+    const opts=categories.map(c=>`<option value="${text(c)}"${c===purchaseCategory?' selected':''}>${text(c)}</option>`).join('');
+    return `<section class="panel" id="nv-purchase-bi">
+      <h2>Acquisti per categoria e ricerca</h2>
+      <div class="nv-purchase-search-row">
+        <div class="field"><label for="nv-purchase-search">Cerca negli acquisti</label>
+          <input id="nv-purchase-search" type="search" autocomplete="off" placeholder="Es. Borse, Seiko, lotto, fornitore…" value="${text(purchaseSearch)}"></div>
+        <div class="field"><label for="nv-purchase-cat">Categoria</label>
+          <select id="nv-purchase-cat"><option value="">Tutte le categorie</option>${opts}</select></div>
+      </div>
+      <div class="nv-purchase-summary" aria-live="polite">
+        <div><span>Articoli acquistati</span><strong id="nv-purchase-items">0</strong></div>
+        <div><span>Spesa selezione</span><strong id="nv-purchase-amount">0,00 €</strong></div>
+        <div><span>Lotti / acquisti</span><strong id="nv-purchase-count">0</strong></div>
+      </div>
+      <div class="nv-purchase-break-head"><strong>Dettaglio per categoria</strong>
+        <button type="button" class="btn alt small" id="nv-purchase-reset">Azzera filtri</button></div>
+      <div id="nv-purchase-results"></div>
+      <p class="hint">La spesa include acquisto della merce, spedizione di acquisto e altre spese attribuite ai lotti. Ogni lotto viene contato una sola volta, senza duplicare il costo degli articoli collegati. Sono compresi anche gli articoli già venduti.</p>
+    </section>`;
   }
   function updatePurchase() {
-    const el=document.getElementById('nv-purchase-results');if(!el)return;
-    const all=purchaseRows(), filtered=all.filter(r=>(!purchaseCategory||r.category===purchaseCategory)&&(!purchasePayer||r.payer===purchasePayer)&&norm([r.title,r.search,r.payer].join(' ')).includes(norm(purchaseSearch)));
-    const valid=onlyDates(filtered), undated=filtered.filter(r=>!validDate(r.date));
-    const period=periodStats(valid,purchaseYear);
-    const yearRows=valid.filter(r=>r.date.startsWith(String(purchaseYear)+'-'));
-    el.innerHTML=`<div class="nv-bi-stats">${stat('Acquisti '+(period.historical?'anno':'YTD'),cash(period.ytd),period.historical?'Anno completo':'Dal 1° gennaio')}
-      ${stat('Confronto anno precedente',delta(period.ytd,period.prior))}
-      ${stat('Acquisti '+(period.historical?'dicembre':'MTD'),cash(period.monthValue))}
-      ${stat('Variazione MoM',delta(period.monthValue,period.prevMonthValue))}
-      ${stat('Articoli acquistati',qty(yearRows).toLocaleString('it-IT'))}
-      ${stat('Investimento anno',cash(sum(yearRows)))}</div>
-      ${undated.length?`<p class="nv-bi-warning">${undated.length} acquisti senza data (${cash(sum(undated))}) esclusi dai confronti temporali. Inserisci la data di acquisto per includerli.</p>`:''}
-      <h3>Acquisti per mese e giorno · ${purchaseYear}</h3><p class="hint">Tocca un mese per aprire i giorni, poi un giorno per vedere lotti e articoli.</p>
-      <div class="nv-bi-months">${groupMonths(yearRows,purchaseYear,'buy')}</div>
-      <h3>Investimento per categoria · ${purchaseYear}</h3>${catBreakdown(yearRows,'buy')}`;
+    const panel=document.getElementById('nv-purchase-bi');
+    if(!panel)return;
+    const terms=norm(purchaseSearch).split(/\s+/).filter(Boolean);
+    const rows=purchaseCategoryRows().filter(r=>(!purchaseCategory||norm(r.category)===norm(purchaseCategory))&&
+      terms.every(term=>r.hay.includes(term)));
+    const total=sum(rows), count=rows.reduce((n,r)=>n+r.qty,0);
+    const purchases=new Set(rows.map(r=>r.source)).size;
+    const put=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    put('nv-purchase-items',count.toLocaleString('it-IT'));
+    put('nv-purchase-amount',cash(total));
+    put('nv-purchase-count',purchases.toLocaleString('it-IT'));
+    const groups=new Map();
+    for(const r of rows){
+      const k=norm(r.category),g=groups.get(k)||{name:r.category,qty:0,amount:0,ids:new Set()};
+      g.qty+=r.qty;g.amount+=r.amount;g.ids.add(r.source);groups.set(k,g);
+    }
+    const sorted=[...groups.values()].sort((a,b)=>b.amount-a.amount||a.name.localeCompare(b.name,'it'));
+    const max=Math.max(1,...sorted.map(g=>g.amount));
+    const target=document.getElementById('nv-purchase-results');
+    if(target)target.innerHTML=sorted.length?sorted.map(g=>
+      `<div class="nv-purchase-cat-row"><div class="nv-purchase-cat-head"><strong>${text(g.name)}</strong><small>${g.qty} ${g.qty===1?'articolo':'articoli'}</small></div>`+
+      `<div class="nv-purchase-cat-amounts"><span>Acquisti: <strong>${text(cash(g.amount))}</strong></span><span>${g.ids.size} ${g.ids.size===1?'acquisto / lotto':'acquisti / lotti'}</span></div>`+
+      `<div class="nv-purchase-cat-bar"><i style="width:${Math.max(0,Math.min(100,g.amount/max*100)).toFixed(2)}%"></i></div></div>`
+    ).join(''):`<p class="hint">Nessun acquisto trovato${purchaseCategory?' per la categoria '+text(purchaseCategory):''}. Controlla che la categoria sia assegnata agli articoli o ai lotti.</p>`;
   }
   function salesBi() {
     const all=soldRows(), years=yearsOf(all);if(!years.includes(salesYear))salesYear=current().y;
@@ -215,6 +294,26 @@
   }
 
   const style=document.createElement('style');style.textContent=`
+    #nv-purchase-bi{margin:14px 0 17px}
+    #nv-purchase-bi h2{margin:0 0 12px;font-size:18px}
+    #nv-purchase-bi .nv-purchase-search-row{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:9px}
+    #nv-purchase-bi .nv-purchase-search-row .field{min-width:0}
+    #nv-purchase-bi .nv-purchase-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
+    #nv-purchase-bi .nv-purchase-summary>div{background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:10px 12px;min-width:0}
+    #nv-purchase-bi .nv-purchase-summary span{display:block;font-size:12px;color:var(--muted)}
+    #nv-purchase-bi .nv-purchase-summary strong{display:block;margin-top:5px;font-size:19px;color:var(--dark);overflow-wrap:anywhere}
+    #nv-purchase-bi .nv-purchase-break-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 8px}
+    #nv-purchase-bi .nv-purchase-cat-row{padding:11px 0;border-bottom:1px solid var(--line)}
+    #nv-purchase-bi .nv-purchase-cat-row:last-child{border:0}
+    #nv-purchase-bi .nv-purchase-cat-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+    #nv-purchase-bi .nv-purchase-cat-head strong{font-size:15px}
+    #nv-purchase-bi .nv-purchase-cat-head small{color:var(--muted)}
+    #nv-purchase-bi .nv-purchase-cat-amounts{display:flex;flex-wrap:wrap;column-gap:16px;row-gap:4px;font-size:13px;margin:5px 0 7px}
+    #nv-purchase-bi .nv-purchase-cat-bar{height:5px;border-radius:6px;background:#e6e9e5;overflow:hidden}
+    #nv-purchase-bi .nv-purchase-cat-bar i{display:block;height:100%;background:var(--gold);border-radius:6px}
+    @media(max-width:540px){#nv-purchase-bi .nv-purchase-search-row{grid-template-columns:1fr}
+      #nv-purchase-bi .nv-purchase-summary strong{font-size:16px}
+      #nv-purchase-bi .nv-purchase-summary>div{padding:9px}}
     .nv-bi-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0 16px}
     .nv-bi-filters .field{min-width:0}.nv-bi-filters select,.nv-bi-filters input{width:100%;min-width:0}
     .nv-bi-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0 20px}
@@ -269,6 +368,13 @@
     if(e.target.id==='nv-bi-sales-year'){salesYear=Number(e.target.value);updateSalesBI();}
     if(e.target.id==='nv-bi-sales-cat'){salesCategory=e.target.value;updateSalesBI();}
     if(e.target.id==='nv-bi-sales-channel'){salesChannel=e.target.value;updateSalesBI();}
+  });
+  document.getElementById('content')?.addEventListener('click',e=>{
+    if(!e.target.closest('#nv-purchase-reset'))return;
+    purchaseSearch='';purchaseCategory='';
+    const search=document.getElementById('nv-purchase-search'),category=document.getElementById('nv-purchase-cat');
+    if(search)search.value='';if(category)category.value='';
+    updatePurchase();
   });
   document.getElementById('content')?.addEventListener('input',e=>{
     if(e.target.id==='nv-purchase-search'){purchaseSearch=e.target.value;updatePurchase();}
