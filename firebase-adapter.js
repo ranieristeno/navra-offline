@@ -192,8 +192,28 @@
         await batch.commit();
       }
       for (const r of pulled) await putRecord(r);
+      // Derive public data only from the confirmed server record inside a transaction.
+      // Concurrent changes retry; stale offline records cannot overwrite a newer catalog projection.
+      let catalogError = '';
+      try {
+      if (typeof navraCatalogProjection === 'function') {
+        const confirmed = await f.f.getDocsFromServer(recordsRef);
+        for (const item of confirmed.docs) {
+          if (item.data().type !== 'watch') continue;
+          await f.f.runTransaction(f.store, async tx => {
+            const fresh = await tx.get(item.ref);
+            const publicRef = f.f.doc(f.store, 'navra_catalog', state.firebaseWorkspace.id + '__' + item.id);
+            const previous = await tx.get(publicRef);
+            const data = fresh.exists() ? navraCatalogProjection(fresh.data(), state.firebaseWorkspace.id) : null;
+            if (data) {
+              if (!previous.exists() || JSON.stringify(previous.data()) !== JSON.stringify(data)) tx.set(publicRef, data);
+            } else if (previous.exists()) tx.delete(publicRef);
+          });
+        }
+      }
+      } catch (e) { catalogError = ' · Catalogo NON aggiornato: ' + safeError(e); }
       await reload();
-      status('Sincronizzato · ' + new Date().toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'}) + ' · ' + pending.length + ' inviati, ' + pulled.length + ' ricevuti');
+      status('Sincronizzato · ' + new Date().toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'}) + ' · ' + pending.length + ' inviati, ' + pulled.length + ' ricevuti' + catalogError);
     } catch (e) { status('Sincronizzazione non riuscita: ' + safeError(e) + '. I dati locali restano salvati.'); }
     finally { syncBusy = false; }
   };
@@ -260,3 +280,4 @@
   // The original boot() opens the existing IndexedDB. Wait for it; never reset its schema.
   void onReady();
 })();
+

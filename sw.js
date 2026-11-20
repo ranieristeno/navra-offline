@@ -1,5 +1,5 @@
-const CACHE = 'navra-offline-v24-purchase-stock-bars';
-const ASSETS = ['./', './index.html', './app.js', './firebase-adapter.js',
+const CACHE = 'navra-offline-v25-web-catalog';
+const ASSETS = ['./navra-catalog.js', './', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
   './navra-accorpa-impostazioni.js', './navra-manutenzioni.js',
@@ -24,3 +24,4 @@ self.addEventListener('fetch', event => {
   }).catch(async () => (await caches.match(event.request)) ||
     (event.request.mode === 'navigate' ? caches.match('./index.html') : Response.error())));
 });
+
