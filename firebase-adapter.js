@@ -196,10 +196,15 @@
       // Concurrent changes retry; stale offline records cannot overwrite a newer catalog projection.
       let catalogError = '';
       try {
-      if (typeof navraCatalogProjection === 'function') {
-        const confirmed = await f.f.getDocsFromServer(recordsRef);
-        for (const item of confirmed.docs) {
-          if (item.data().type !== 'watch') continue;
+      if (typeof navraCatalogProjection === 'function') {     
+const confirmed = pending.length
+  ? await f.f.getDocsFromServer(recordsRef)
+  : snapshot;
+const candidates = confirmed.docs.filter(item =>
+  item.data().type === 'watch' &&
+  item.data().data?.webshop != null
+);
+for (const item of candidates) {
           await f.f.runTransaction(f.store, async tx => {
             const fresh = await tx.get(item.ref);
             const publicRef = f.f.doc(f.store, 'navra_catalog', state.firebaseWorkspace.id + '__' + item.id);
