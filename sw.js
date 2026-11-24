@@ -1,11 +1,17 @@
-const CACHE = 'navra-offline-v25-web-catalog';
-const ASSETS = ['./navra-catalog.js', './', './index.html', './app.js', './firebase-adapter.js',
+/* NAVRA v26 - cache includes the whole v25 app plus v23 sale drilldowns and new finance module. */
+const CACHE = 'navra-offline-v26-profit-cash-locations';
+const ASSETS = [
+  './', './index.html', './app.js', './firebase-adapter.js',
   './navra-articoli.js', './navra-upgrade.js', './navra-lotti.js',
   './navra-report-articoli.js', './navra-organizzazione-vendite.js',
   './navra-accorpa-impostazioni.js', './navra-manutenzioni.js',
   './navra-elimina-lotti.js', './navra-vendite-analisi.js',
   './navra-categorie-lotti.js', './navra-bi-acquisti-vendite.js',
-  './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-192.png', './icon-512.png'];
+  './navra-vendite-categorie.js', './navra-catalog.js',
+  './navra-finanza-soci.js',
+  './manifest.webmanifest', './icon.svg', './icon-180.png',
+  './icon-192.png', './icon-512.png'
+];
 self.addEventListener('install', event => event.waitUntil(
   caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
 ));
@@ -24,4 +30,3 @@ self.addEventListener('fetch', event => {
   }).catch(async () => (await caches.match(event.request)) ||
     (event.request.mode === 'navigate' ? caches.match('./index.html') : Response.error())));
 });
-
